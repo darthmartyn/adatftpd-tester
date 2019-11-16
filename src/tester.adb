@@ -1,21 +1,28 @@
+with Ada.Command_Line;
 with Ada.Direct_IO;
-with Ada.Streams;
 with Ada.Directories;
+with Ada.Streams;
+with Ada.Strings.Fixed;
 with Ada.Strings.Unbounded;
+with Ada.Text_IO;
 with GNAT.Expect;
+with GNAT.OS_Lib;
 with GNAT.Random_Numbers;
 with Interfaces;
-with Ada.Text_IO;
-with Ada.Strings.Fixed;
 
 --  The idea of this program is to generate a whole series of
---  binary files of various randomly selected sizes.
+--  binary files of various randomly selected sizes. Each byte of each
+--  file is also randomly generated.
 --
---  An instance of 'tftp' will then be spawned and commanded to
+--  An instance of 'atftp' will then be spawned and commanded to
 --  transfer each of the binary files into a local copy,  thus making
 --  a pair of files.
 --
---  This program will then ensure the file pairs are identical.
+--  This program will then ensure the file pairs are identical, byte by byte.
+--  Any file pairs that fail this test,  are retained after the program
+--  terminates and a program exit status of -1 shall be emitted.
+--
+--  Successful program completion shall emit a program exit status of 0.
 
 procedure Tester is
 
@@ -29,6 +36,9 @@ procedure Tester is
 
    -- Random Number Generator for the number of files
    Number_Of_Files_Generator : GNAT.Random_Numbers.Generator;
+
+   Program_Exit_Status : Ada.Command_Line.Exit_Status :=
+     Ada.Command_Line.Success;
 
 begin
 
@@ -63,7 +73,7 @@ begin
          Input_Filename  : Input_Filename_String;
          Output_Filename : Output_Filename_String;
          Filesize        : Integer;
-         Passed          : Boolean;
+         Passed          : Boolean := True;
       end record;
 
       type File_Array_Type is array
@@ -76,8 +86,7 @@ begin
       Generate_Test_Files:
       for I in File_Array'Range loop
 
-         GNAT.Random_Numbers.Reset
-           (Gen => File_Size_Generator);
+         GNAT.Random_Numbers.Reset (Gen => File_Size_Generator);
 
          declare
 
@@ -87,8 +96,9 @@ begin
                  Side   => Ada.Strings.Left);
 
             Padded_ID : constant String :=
-              (if I <= 9 then ("00" & Trimmed_ID)
-               elsif I <= 99 then ("0" & Trimmed_ID) else Trimmed_ID);
+              (if    I <= 9 then ("00" & Trimmed_ID)
+               elsif I <= 99 then ("0" & Trimmed_ID)
+               else  Trimmed_ID);
 
          begin
 
@@ -102,8 +112,8 @@ begin
                     Max => Integer(Interfaces.Unsigned_16'Last)),
                Passed => False);
 
-            if not Ada.Directories.Exists
-                     (Name => File_Array(I).Input_Filename)
+            if not
+               Ada.Directories.Exists (Name => File_Array(I).Input_Filename)
             then
 
                declare
@@ -150,8 +160,7 @@ begin
 
                   end loop For_Each_Byte_To_Write;
 
-                  Byte_IO.Close
-                    (File => File_Handle);
+                  Byte_IO.Close (File => File_Handle);
 
                end;
 
@@ -161,10 +170,37 @@ begin
 
       end loop Generate_Test_Files;
 
-      -- Perform the TFTP transfer
+      For_Each_File_To_Transfer:
+      for FXfer of File_Array loop
 
+         Execute_File_Transfer:
+         declare
 
+            use GNAT.OS_Lib;
 
+            Success : Boolean := False;
+
+            Command : constant String :=
+              "/usr/bin/atftp localhost --get --remote-file " &
+              FXfer.Input_Filename &
+              " --local-file " &
+              FXfer.Output_Filename;
+
+            Args : Argument_List_Access :=
+              Argument_String_To_List (Command);
+
+         begin
+
+            Spawn
+              (Program_Name => Args (Args'First).all,
+               Args         => Args (Args'First + 1..Args'Last),
+               Success      => Success);
+
+            Free(Args);
+
+         end Execute_File_Transfer;
+
+      end loop For_Each_File_To_Transfer;
 
       -- Check the results by comparing each file
       For_Each_File_To_Check:
@@ -183,8 +219,8 @@ begin
             P.Passed :=
                Ada.Directories.Exists (Name => P.Input_Filename) and then
                Ada.Directories.Exists (Name => P.Output_Filename) and then
-               Ada.Directories.Size(P.Input_Filename) =
-               Ada.Directories.Size(P.Output_Filename);
+               Ada.Directories.Size (P.Input_Filename) =
+               Ada.Directories.Size (P.Output_Filename);
 
             if P.Passed then
 
@@ -202,24 +238,33 @@ begin
 
                Byte_IO.Reset (File => File_2_Handle);
 
-               declare
+               while not End_Of_File (File => File_1_Handle)
+                     and then
+                     not End_Of_File (File => File_2_Handle)
+               loop
 
-                  Byte_1, Byte_2 : Interfaces.Unsigned_8;
-                  use type Interfaces.Unsigned_8;
+                  declare
 
-               begin
+                     Byte_1, Byte_2 : Interfaces.Unsigned_8;
+                     use type Interfaces.Unsigned_8;
 
-                  Byte_IO.Read
-                     (File => File_1_Handle,
-                      Item => Byte_1);
+                  begin
 
-                  Byte_IO.Read
-                     (File => File_2_Handle,
-                      Item => Byte_2);
+                     Byte_IO.Read
+                        (File => File_1_Handle,
+                         Item => Byte_1);
 
-                  P.Passed := (Byte_1 = Byte_2);
+                     Byte_IO.Read
+                        (File => File_2_Handle,
+                         Item => Byte_2);
 
-               end;
+                     P.Passed := P.Passed and then (Byte_1 = Byte_2);
+
+                  end;
+
+                  exit when not P.Passed;
+
+               end loop;
 
                Byte_IO.Close (File => File_1_Handle);
 
@@ -227,17 +272,38 @@ begin
 
             end if;
 
+            exit when not P.Passed;
+
          end Check_Infile_Matches_Outfile;
 
       end loop For_Each_File_To_Check;
 
-      -- Delete all the test files,  but leave ones that didn't match
+      Delete_Test_Files:
+      declare
+         use type  Ada.Command_Line.Exit_Status;
+      begin
 
+         For_Each_File_To_Delete:
+         for D of File_Array loop
 
+            if D.Passed then
+
+               Ada.Directories.Delete_File (Name => D.Input_Filename);
+
+               Ada.Directories.Delete_File (Name => D.Output_Filename);
+
+            elsif Program_Exit_Status = Ada.Command_Line.Success then
+
+               Program_Exit_Status := Ada.Command_Line.Failure;
+
+            end if;
+
+         end loop For_Each_File_To_Delete;
+
+      end Delete_Test_Files;
 
    end Test_TFTP_File_Transfers;
 
-
-
+   Ada.Command_Line.Set_Exit_Status (Code => Program_Exit_Status);
 
 end Tester;
