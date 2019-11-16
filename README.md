@@ -4,7 +4,7 @@ The purpose of this program is to generate a whole series of binary files of var
 
 An instance of 'atftp' will then be spawned and commanded to transfer each of the binary files into a local copy,  thus making a pair of files.
 
-This program will then ensure the file pairs are identical, byte by byte.  Any file pairs that fail this test,  are retained after the program terminates and a program exit status of -1 shall be emitted.
+This program will then ensure the file pairs are identical, byte by byte.  Any file pairs that fail this test,  are retained after the program terminates and a program exit status of 1 shall be emitted.
 
 Successful program completion shall emit a program exit status of 0.
 

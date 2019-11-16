@@ -20,7 +20,7 @@ with Interfaces;
 --
 --  This program will then ensure the file pairs are identical, byte by byte.
 --  Any file pairs that fail this test,  are retained after the program
---  terminates and a program exit status of -1 shall be emitted.
+--  terminates and a program exit status of 1 shall be emitted.
 --
 --  Successful program completion shall emit a program exit status of 0.
 
