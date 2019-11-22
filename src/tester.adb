@@ -51,7 +51,7 @@ begin
       -- Filesize generator
       File_Size_Generator : GNAT.Random_Numbers.Generator;
 
-      Number_Of_Files : constant Integer :=
+      Number_Of_Files : constant Positive :=
         Random_Integer
           (Gen => Number_Of_Files_Generator,
            Min => 1,
@@ -73,7 +73,7 @@ begin
          Input_Filename  : Input_Filename_String;
          Output_Filename : Output_Filename_String;
          Filesize        : Integer;
-         Passed          : Boolean := True;
+         Passed          : Boolean := False;
       end record;
 
       type File_Array_Type is array
@@ -178,7 +178,7 @@ begin
 
             use GNAT.OS_Lib;
 
-            Success : Boolean := False;
+            Success : Boolean;
 
             Command : constant String :=
               "/usr/bin/atftp localhost --get --remote-file " &
@@ -258,7 +258,7 @@ begin
                         (File => File_2_Handle,
                          Item => Byte_2);
 
-                     P.Passed := P.Passed and then (Byte_1 = Byte_2);
+                     P.Passed := (Byte_1 = Byte_2);
 
                   end;
 
